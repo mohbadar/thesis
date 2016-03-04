@@ -14,7 +14,7 @@ class sp_500():
         hdr = {'User-Agent': 'Mozilla/5.0'}
         req = urllib2.Request(site, headers=hdr)
         page = urllib2.urlopen(req)
-        soup = BeautifulSoup(page)
+        soup = BeautifulSoup(page, "lxml")
 
         table = soup.find('table', {'class': 'wikitable sortable'})
     
