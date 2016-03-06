@@ -11,12 +11,9 @@ import scipy.optimize as sco
 import time
 import datetime
 from progressbar import AnimatedMarker, Bar, BouncingBar, Counter, ETA, \
-    AdaptiveETA, FileTransferSpeed, FormatLabel, Percentage, \
-    ProgressBar, ReverseBar, RotatingMarker, \
-    SimpleProgress, Timer
-
-
-
+	AdaptiveETA, FileTransferSpeed, FormatLabel, Percentage, \
+	ProgressBar, ReverseBar, RotatingMarker, \
+	SimpleProgress, Timer
 
 class portfolio:
 	data = [] # storing stock prices for the companies in the portfolio
@@ -26,12 +23,12 @@ class portfolio:
 	end_prices = []
 	
 	min_return = 0.0 # minimal return value 
-	#max_return = 0.5 # maximum return value
-	step = 50 
+	max_return = 0.55 # maximum return value
+	step = 65
 	threshold = 0.01 # the companies with weights below this value are not included in portfolio
 	
 	# Constructor
-	def __init__(self, _symbols, _start, _end, _return, _weights = None):
+	def __init__(self, _symbols, _start, _end, _max_risk, _weights = None):
 		# Initializing data
 		self.data = pd.DataFrame()
 		self.gspc = pd.DataFrame()
@@ -51,8 +48,7 @@ class portfolio:
 		# 
 		self.start = _start
 		self.end = _end
-		self.max_risk = 0
-		self.max_return = _return
+		self.max_risk = _max_risk
 
 		self.fetch(_symbols)
 		self.set_returns() 
@@ -99,16 +95,22 @@ class portfolio:
 	
 	# Retrieving stock prices
 	def fetch(self, symbols):
+		print "Fetching symbols data:"
+		i = 1
+		pbar = ProgressBar(widgets=[SimpleProgress()], maxval=len(symbols)).start()
 		for sym in symbols:
 			try:
 				self.data[sym]  = web.DataReader(sym, data_source='yahoo', start=self.start, end=self.end)['Adj Close']
 				self.symbols.append(sym)   
+				pbar.update(i)
 				if self.data[sym].size > self.num_of_days:
 					self.num_of_days = self.data[sym].size
 			except IOError:
 				print sym + ': no data available for requested period'
 				continue
-				
+			i = i + 1
+
+		pbar.finish()
 		self.data.column = self.symbols
 		self.set_days()
 		print 'Data fetched for ' + str(len(self.symbols)) + ' symbols and '+ str(self.num_of_days)  + ' trading days'
@@ -160,23 +162,21 @@ class portfolio:
 			
 		portfolio_return = (portfolio_end - portfolio_start) / portfolio_start
 		print '\nPortfolio return: ' + self.percent(portfolio_return)
-		
 		return
-	
-	def show_time(self, start_time):
-		seconds = (time.time() - start_time)
-		print ('Wall time: %s' % str(datetime.timedelta(seconds=seconds)))
 
 	#
 	def calc(self):
 		start_time = time.time()
 		self.get_effective_set()
+
+		print '\nThe portfolio with the acceptable risk limit: '		
+		self.show( self.get_risk_limit_weights() )
+
 		print '\nThe highest Sharpe ratio portfolio: '
 		self.show( self.get_max_sharpe_weights() )
 		
 		print '\nThe minimal variance porfolio: '
 		self.show( self.get_min_variance_weights() )
-		self.show_time(start_time)
 		
 	
 	# 
@@ -222,11 +222,14 @@ class portfolio:
 	# Функция, получающая веса бумаг в портфеле в качестве входных параметров, и возвращающая массив 
 	# данных о портфеле в формате [волатильность, доходность, коэффициент Шарпа]
 	def statistics(self, weights):
-		weights = np.array(weights)
-		portfolio_return = self.get_portfolio_return(weights)
-		portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(self.returns.cov() * self.num_of_days, weights)))
-	
-		return np.array([portfolio_volatility, portfolio_return, portfolio_return / portfolio_volatility])
+		try:
+			weights = np.array(weights)
+			portfolio_return = self.get_portfolio_return(weights)
+			portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(self.returns.cov() * self.num_of_days, weights)))
+			return np.array([portfolio_volatility, portfolio_return, portfolio_return / portfolio_volatility])
+		except ZeroDivisionError:
+			print 'Zero division exception'
+			return np.array([0, 0, 0])
 	
 	# Функция вычисления минимального отклонения
 	def min_volatility(self, weights):
@@ -249,6 +252,16 @@ class portfolio:
 			return 0
 		#return np.sum(returns.mean() * weights) * num_of_days
 	
+	# Функция вычисления портфеля с приемлемым уровнем риска
+	def get_risk_limit_weights(self):
+		volatility = 0 
+		weights = []
+		for r, v, w in zip(self.effective_returns, self.effective_volatilities, self.effective_weights):
+			if v >= volatility:
+				if v <= self.max_risk:
+					weights = w
+		return weights
+
 	# Функция вычисления портфеля с максимальным коэффицентом Шарпа (отношением доходность/волатильность)
 	def get_max_sharpe_weights(self):
 		max_sharpe = 0
