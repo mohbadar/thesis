@@ -167,10 +167,10 @@ class portfolio:
 	#
 	def calc(self):
 		start_time = time.time()
-		self.get_effective_set()
+		self.calc_effective_set()
 
-		print '\nThe portfolio with the acceptable risk limit: '		
-		self.show( self.get_risk_limit_weights() )
+		#print '\nThe portfolio with the acceptable risk limit: '		
+		#self.show( self.get_risk_limit_weights() )
 
 		print '\nThe highest Sharpe ratio portfolio: '
 		self.show( self.get_max_sharpe_weights() )
@@ -194,30 +194,37 @@ class portfolio:
 			print 'The optimal portfolio is not calculated. Run calc() first'
 		return
 	
-	# Вычисление эффективного множества (effective set)
-	def get_effective_set(self):
-		i = 0
+	#
+	def calc_effective_set(self):
 		self.effective_volatilities = []
 		self.effective_returns = []
 		self.effective_weights = []
-	
-		cons = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-		bnds = tuple((0, 1) for x in range(len(self.symbols)))
 
 		pbar = ProgressBar(widgets=[Percentage(), Bar(), ETA()], maxval=self.max_return).start()
-
 		for y in np.linspace(self.min_return, self.max_return, self.step):
-			cons = ({'type': 'eq', 'fun': lambda x: self.statistics(x)[1] - y}, {'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-			result = sco.minimize(self.min_volatility, len(self.symbols) * [1. / len(self.symbols),], method='SLSQP', bounds=bnds, constraints=cons)
-			self.effective_volatilities.append(result['fun'])
+			eff_set = self.get_effective_set(y)
+
+			self.effective_volatilities.append(eff_set[0])
+			self.effective_weights.append(eff_set[1])
 			self.effective_returns.append(y)
-			self.effective_weights.append(result['x'])
 			pbar.update(y)
-	
+
 		pbar.finish()
 		self.effective_volatilities = np.array(self.effective_volatilities)
 		self.effective_returns = np.array(self.effective_returns)
 		self.effective_weights = np.array(self.effective_weights)
+		print str(len(self.effective_volatilities)) + ' ' + str(len(self.effective_weights)) + ' ' + str(len(self.effective_returns))
+
+	# Вычисление эффективного множества (effective set)
+	def get_effective_set(self, y):	
+		cons = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+		bnds = tuple((0, 1) for x in range(len(self.symbols)))
+
+		for y in np.linspace(self.min_return, self.max_return, self.step):
+			cons = ({'type': 'eq', 'fun': lambda x: self.statistics(x)[1] - y}, {'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+			result = sco.minimize(self.min_volatility, len(self.symbols) * [1. / len(self.symbols),], method='SLSQP', bounds=bnds, constraints=cons)
+			return [result['fun'], result['x']]
+	
 
 	# Функция, получающая веса бумаг в портфеле в качестве входных параметров, и возвращающая массив 
 	# данных о портфеле в формате [волатильность, доходность, коэффициент Шарпа]
