@@ -23,8 +23,8 @@ class portfolio:
 	end_prices = []
 	
 	min_return = 0.0 # minimal return value 
-	max_return = 0.55 # maximum return value
-	step = 65
+	max_return = 0.3 # maximum return value
+	step = 50
 	threshold = 0.01 # the companies with weights below this value are not included in portfolio
 	
 	# Constructor
@@ -92,7 +92,7 @@ class portfolio:
 		for sym in self.symbols:
 			self.start_prices.append(self.data[sym][self.start])
 			self.end_prices.append(self.data[sym][self.end])
-	
+
 	# Retrieving stock prices
 	def fetch(self, symbols):
 		print "Fetching symbols data:"
@@ -100,11 +100,21 @@ class portfolio:
 		pbar = ProgressBar(widgets=[SimpleProgress()], maxval=len(symbols)).start()
 		for sym in symbols:
 			try:
-				self.data[sym]  = web.DataReader(sym, data_source='yahoo', start=self.start, end=self.end)['Adj Close']
-				self.symbols.append(sym)   
+				#self.data[sym]  = web.DataReader(sym, data_source='yahoo', start=self.start, end=self.end)['Adj Close']
+				data = pd.DataFrame()
+				data  = web.DataReader(sym, data_source='yahoo', start=self.start, end=self.end)['Adj Close']
 				pbar.update(i)
-				if self.data[sym].size > self.num_of_days:
-					self.num_of_days = self.data[sym].size
+
+				if self.num_of_days != -1 and len(data) < self.num_of_days:
+					print sym + ': historical data contains NaN. Excluding'
+					continue
+				else:
+					self.symbols.append(sym)
+					self.data[sym] = data
+					if self.data[sym].size != self.num_of_days:
+						self.num_of_days = self.data[sym].size
+					
+
 			except IOError:
 				print sym + ': no data available for requested period'
 				continue
@@ -202,30 +212,35 @@ class portfolio:
 
 		pbar = ProgressBar(widgets=[Percentage(), Bar(), ETA()], maxval=self.max_return).start()
 		for y in np.linspace(self.min_return, self.max_return, self.step):
-			eff_set = self.get_effective_set(y)
-
-			self.effective_volatilities.append(eff_set[0])
-			self.effective_weights.append(eff_set[1])
-			self.effective_returns.append(y)
+			#e1 = threading.Event()
+			#t1 = threading.Thread(target=self.get_effective_set, args=(y))
+			#t1.start()
+			self.get_effective_set(y)
+			#threading.Thread(target=self.get_effective_set, args=({y})).start()
 			pbar.update(y)
 
 		pbar.finish()
 		self.effective_volatilities = np.array(self.effective_volatilities)
 		self.effective_returns = np.array(self.effective_returns)
 		self.effective_weights = np.array(self.effective_weights)
-		print str(len(self.effective_volatilities)) + ' ' + str(len(self.effective_weights)) + ' ' + str(len(self.effective_returns))
+		#print str(len(self.effective_volatilities)) + ' ' + str(len(self.effective_weights)) + ' ' + str(len(self.effective_returns))
 
 	# Вычисление эффективного множества (effective set)
 	def get_effective_set(self, y):	
 		cons = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
 		bnds = tuple((0, 1) for x in range(len(self.symbols)))
 
-		for y in np.linspace(self.min_return, self.max_return, self.step):
-			cons = ({'type': 'eq', 'fun': lambda x: self.statistics(x)[1] - y}, {'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-			result = sco.minimize(self.min_volatility, len(self.symbols) * [1. / len(self.symbols),], method='SLSQP', bounds=bnds, constraints=cons)
-			return [result['fun'], result['x']]
-	
+		cons = ({'type': 'eq', 'fun': lambda x: self.statistics(x)[1] - y}, {'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+		result = sco.minimize(self.min_volatility, len(self.symbols) * [1. / len(self.symbols),], method='SLSQP', bounds=bnds, constraints=cons)
+		self.effective_volatilities.append(result['fun'])
+		self.effective_weights.append(result['x'])
+		self.effective_returns.append(y)	
+		#if result[x] is NaN:
 
+		if result['status'] != 0:
+			print result
+		return
+	
 	# Функция, получающая веса бумаг в портфеле в качестве входных параметров, и возвращающая массив 
 	# данных о портфеле в формате [волатильность, доходность, коэффициент Шарпа]
 	def statistics(self, weights):
