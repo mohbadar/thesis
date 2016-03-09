@@ -17,21 +17,21 @@ from progressbar import AnimatedMarker, Bar, BouncingBar, Counter, ETA, \
 
 class portfolio:
 	data = [] # storing stock prices for the companies in the portfolio
-	gspc = [] # storing S&P500 index prices for the given period
+	spy = [] # storing S&P500 index prices for the given period
 	returns = []
 	start_prices = []
 	end_prices = []
 	
 	min_return = 0.0 # minimal return value 
-	max_return = 0.3 # maximum return value
-	step = 50
+	max_return = 1.0 # maximum return value
+	step = 100
 	threshold = 0.01 # the companies with weights below this value are not included in portfolio
 	
 	# Constructor
 	def __init__(self, _symbols, _start, _end, _max_risk, _weights = None):
 		# Initializing data
 		self.data = pd.DataFrame()
-		self.gspc = pd.DataFrame()
+		self.spy = pd.DataFrame()
 		self.num_of_days = 0
 		self.feasible_returns = []
 		self.feasible_volatilities = []
@@ -128,13 +128,13 @@ class portfolio:
 	
 	# Retrieving data for S&P500 index:
 	def fetch_sp500(self):
-		self.gspc = web.DataReader('^GSPC', data_source='yahoo', start=self.start, end=self.end)['Adj Close']
-		self.gspc.column = '^GSPC'
+		self.spy = web.DataReader('SPY', data_source='yahoo', start=self.start, end=self.end)['Adj Close']
+		self.spy.column = 'SPY'
 		
 	#
 	def show(self, weights):
 		print "Investment period: " + self.start + " - " + self.end
-		print "Risk limit: " + str(self.max_risk)
+		#print "Risk limit: " + str(self.max_risk)
 		
 		print "Portfolio volatility: " + str( self.statistics(weights)[0].round(3) )
 		print "Portfolio return: " + str( self.statistics(weights)[1].round(3) )   
@@ -154,10 +154,10 @@ class portfolio:
 			print sym + ' (' + str(weight) + '): ' + str(start_price.round(3)) + ' -> ' + str(end_price.round(3)) + ' (' + self.percent(return_rate) + ')'
 	#
 	def show_sp500(self):
-		start = self.gspc[self.start]
-		end = self.gspc[self.end]
+		start = self.spy[self.start]
+		end = self.spy[self.end]
 		return_rate = (end - start) / start
-		self.show_symbol('S&P500', None, start, end, return_rate)
+		self.show_symbol('SPDR S&P500 ETF', None, start, end, return_rate)
 
 	#
 	def test(self, weights):     
@@ -179,8 +179,8 @@ class portfolio:
 		start_time = time.time()
 		self.calc_effective_set()
 
-		#print '\nThe portfolio with the acceptable risk limit: '		
-		#self.show( self.get_risk_limit_weights() )
+		print '\nThe portfolio with the acceptable risk limit (' + str(self.max_risk) + '): '		
+		self.show( self.get_risk_limit_weights() )
 
 		print '\nThe highest Sharpe ratio portfolio: '
 		self.show( self.get_max_sharpe_weights() )
@@ -188,7 +188,13 @@ class portfolio:
 		print '\nThe minimal variance porfolio: '
 		self.show( self.get_min_variance_weights() )
 		
-	
+	# 
+	def get_acceptable(self):
+		if len(self.sharpe_symbols) > 0:
+			return self.acceptable_symbols, self.acceptable_weights
+		else:
+			print 'The optimal portfolio is not calculated. Run calc() first'
+
 	# 
 	def get_risky(self):
 		if len(self.sharpe_symbols) > 0:
@@ -212,11 +218,11 @@ class portfolio:
 
 		pbar = ProgressBar(widgets=[Percentage(), Bar(), ETA()], maxval=self.max_return).start()
 		for y in np.linspace(self.min_return, self.max_return, self.step):
-			#e1 = threading.Event()
-			#t1 = threading.Thread(target=self.get_effective_set, args=(y))
-			#t1.start()
-			self.get_effective_set(y)
-			#threading.Thread(target=self.get_effective_set, args=({y})).start()
+			result = self.get_effective_set(y)
+			#print result
+			#self.effective_volatilities.append(result[0])
+			#self.effective_weights.append(result[1])
+			#self.effective_returns.append(y)
 			pbar.update(y)
 
 		pbar.finish()
@@ -231,27 +237,20 @@ class portfolio:
 		bnds = tuple((0, 1) for x in range(len(self.symbols)))
 
 		cons = ({'type': 'eq', 'fun': lambda x: self.statistics(x)[1] - y}, {'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-		result = sco.minimize(self.min_volatility, len(self.symbols) * [1. / len(self.symbols),], method='SLSQP', bounds=bnds, constraints=cons)
+		result = sco.minimize(self.min_volatility, len(self.symbols) * [1. / len(self.symbols),], method='SLSQP', bounds=bnds, constraints=cons, options={'ftol':1e-01})
 		self.effective_volatilities.append(result['fun'])
 		self.effective_weights.append(result['x'])
 		self.effective_returns.append(y)	
-		#if result[x] is NaN:
-
-		if result['status'] != 0:
-			print result
-		return
+		
+		return result['fun'], result['x']
 	
 	# Функция, получающая веса бумаг в портфеле в качестве входных параметров, и возвращающая массив 
 	# данных о портфеле в формате [волатильность, доходность, коэффициент Шарпа]
 	def statistics(self, weights):
-		try:
-			weights = np.array(weights)
-			portfolio_return = self.get_portfolio_return(weights)
-			portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(self.returns.cov() * self.num_of_days, weights)))
-			return np.array([portfolio_volatility, portfolio_return, portfolio_return / portfolio_volatility])
-		except ZeroDivisionError:
-			print 'Zero division exception'
-			return np.array([0, 0, 0])
+		weights = np.array(weights)
+		portfolio_return = self.get_portfolio_return(weights)
+		portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(self.returns.cov() * self.num_of_days, weights)))
+		return np.array([portfolio_volatility, portfolio_return, portfolio_return / portfolio_volatility])
 	
 	# Функция вычисления минимального отклонения
 	def min_volatility(self, weights):
@@ -266,13 +265,7 @@ class portfolio:
 			portfolio_start_price = portfolio_start_price + w * sp
 			portfolio_end_price = portfolio_end_price + w * ep
 		
-		try:
-			return ((portfolio_end_price - portfolio_start_price) / portfolio_start_price)
-		except ZeroDivisionError:
-			print 'Zero division exception'
-			print weights
-			return 0
-		#return np.sum(returns.mean() * weights) * num_of_days
+		return ((portfolio_end_price - portfolio_start_price) / portfolio_start_price)
 	
 	# Функция вычисления портфеля с приемлемым уровнем риска
 	def get_risk_limit_weights(self):
@@ -282,6 +275,14 @@ class portfolio:
 			if v >= volatility:
 				if v <= self.max_risk:
 					weights = w
+
+		self.acceptable_symbols = []
+		self.acceptable_weights = []
+		for sym, w in zip(self.symbols, weights):
+			if w > self.threshold:
+				self.acceptable_symbols.append(sym)
+				self.acceptable_weights.append(w.round(3))
+
 		return weights
 
 	# Функция вычисления портфеля с максимальным коэффицентом Шарпа (отношением доходность/волатильность)
