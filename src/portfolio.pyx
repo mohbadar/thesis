@@ -14,6 +14,8 @@ from progressbar import AnimatedMarker, Bar, BouncingBar, Counter, ETA, \
 	AdaptiveETA, FileTransferSpeed, FormatLabel, Percentage, \
 	ProgressBar, ReverseBar, RotatingMarker, \
 	SimpleProgress, Timer
+from multiprocessing import Process
+import os
 
 class portfolio:
 	data = [] # storing stock prices for the companies in the portfolio
@@ -23,8 +25,9 @@ class portfolio:
 	end_prices = []
 	
 	min_return = 0.0 # minimal return value 
-	max_return = 1.0 # maximum return value
+	max_return = 0.3 # maximum return value
 	step = 100
+	precision = 1e-02
 	threshold = 0.01 # the companies with weights below this value are not included in portfolio
 	
 	# Constructor
@@ -128,8 +131,8 @@ class portfolio:
 	
 	# Retrieving data for S&P500 index:
 	def fetch_sp500(self):
-		self.spy = web.DataReader('SPY', data_source='yahoo', start=self.start, end=self.end)['Adj Close']
-		self.spy.column = 'SPY'
+		self.spy = web.DataReader('^GSPC', data_source='yahoo', start=self.start, end=self.end)['Adj Close']
+		self.spy.column = '^GSPC'
 		
 	#
 	def show(self, weights):
@@ -157,7 +160,7 @@ class portfolio:
 		start = self.spy[self.start]
 		end = self.spy[self.end]
 		return_rate = (end - start) / start
-		self.show_symbol('SPDR S&P500 ETF', None, start, end, return_rate)
+		self.show_symbol('S&P500', None, start, end, return_rate)
 
 	#
 	def test(self, weights):     
@@ -179,8 +182,8 @@ class portfolio:
 		start_time = time.time()
 		self.calc_effective_set()
 
-		print '\nThe portfolio with the acceptable risk limit (' + str(self.max_risk) + '): '		
-		self.show( self.get_risk_limit_weights() )
+		#print '\nThe portfolio with the acceptable risk limit (' + str(self.max_risk) + '): '		
+		#self.show( self.get_risk_limit_weights() )
 
 		print '\nThe highest Sharpe ratio portfolio: '
 		self.show( self.get_max_sharpe_weights() )
@@ -218,11 +221,7 @@ class portfolio:
 
 		pbar = ProgressBar(widgets=[Percentage(), Bar(), ETA()], maxval=self.max_return).start()
 		for y in np.linspace(self.min_return, self.max_return, self.step):
-			result = self.get_effective_set(y)
-			#print result
-			#self.effective_volatilities.append(result[0])
-			#self.effective_weights.append(result[1])
-			#self.effective_returns.append(y)
+			self.get_effective_set(y)
 			pbar.update(y)
 
 		pbar.finish()
@@ -237,13 +236,11 @@ class portfolio:
 		bnds = tuple((0, 1) for x in range(len(self.symbols)))
 
 		cons = ({'type': 'eq', 'fun': lambda x: self.statistics(x)[1] - y}, {'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-		result = sco.minimize(self.min_volatility, len(self.symbols) * [1. / len(self.symbols),], method='SLSQP', bounds=bnds, constraints=cons, options={'ftol':1e-01})
+		result = sco.minimize(self.min_volatility, len(self.symbols) * [1. / len(self.symbols),], method='SLSQP', bounds=bnds, constraints=cons, options={'ftol':self.precision})
 		self.effective_volatilities.append(result['fun'])
 		self.effective_weights.append(result['x'])
 		self.effective_returns.append(y)	
-		
-		return result['fun'], result['x']
-	
+			
 	# Функция, получающая веса бумаг в портфеле в качестве входных параметров, и возвращающая массив 
 	# данных о портфеле в формате [волатильность, доходность, коэффициент Шарпа]
 	def statistics(self, weights):
